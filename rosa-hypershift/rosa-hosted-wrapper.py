@@ -762,6 +762,7 @@ def _cluster_load(kubeconfig, my_path, hosted_cluster_name, mgmt_cluster_name, s
 
     os.chdir(my_path + '/e2e-benchmarking/workloads/kube-burner-ocp-wrapper')
     load_env["JOB_ITERATIONS"] = str(jobs)
+    load_env ["ITERATIONS"] = str(jobs)
     load_env["CHURN"] = "true"
     load_env["CHURN_DURATION"] = load_duration
     load_env["CHURN_PERCENT"] = "10"
