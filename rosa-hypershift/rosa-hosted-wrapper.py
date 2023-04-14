@@ -780,8 +780,7 @@ def _cluster_load(kubeconfig, my_path, hosted_cluster_name, mgmt_cluster_name, s
     load_env["WORKLOAD"] = "cluster-density"
     load_env["JOB_PAUSE"] = str(randrange(100, 1000)) + "s"
     load_env["KUBE_DIR"] = my_path
-    print(load_env)
-    load_command = ["ITERATIONS=${ITERATIONS} ./run.sh"]
+    load_command = ["./run.sh"]
     logging.debug(load_command)
     load_log = open(my_path + '/cluster_load.log', 'w')
     if not force_terminate:
