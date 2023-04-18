@@ -1117,12 +1117,6 @@ def main():
         type=str,
         help='Pass a custom oidc config id to use for the oidc provider. NOTE: this is not deleted on cleanup')
     parser.add_argument(
-        '--kube-burner-iterations',
-        type=str,
-        help='Pass a value 300, 800, 1500',
-        default= '300'
-    )
-    parser.add_argument(
         '--workload-type',
         type=str,
         help="Pass a workload type",
@@ -1292,8 +1286,6 @@ def main():
         oidc_config_id = _gen_oidc_config_id(rosa_cmnd, cluster_name_seed, my_path)
         oidc_cleanup = True
 
-    if args.workload_type:
-        workload_type = args.workload_type
     
     # Get connected to management cluster
     logging.info("Getting information of %s management cluster on %s organization" % (args.mgmt_cluster, args.mgmt_org_id))
@@ -1373,7 +1365,7 @@ def main():
                     vpc_info = vpcs[(loop_counter - 1)]
                     logging.debug("Creating cluster on VPC %s, with subnets: %s" % (vpc_info[0], vpc_info[1]))
                 try:
-                    thread = threading.Thread(target=_build_cluster, args=(ocm_cmnd, rosa_cmnd, cluster_name_seed, args.must_gather_all, args.mgmt_cluster, mgmt_metadata['provision_shard'], args.create_vpc, vpc_info, args.workers_wait_time, args.add_cluster_load, args.cluster_load_duration, jobs, workers, my_path, my_uuid, loop_counter, es, args.es_url, args.es_index, args.es_index_retry, mgmt_kubeconfig_path, sc_kubeconfig_path, all_clusters_installed, args.service_cluster, oidc_config_id, workload_type))
+                    thread = threading.Thread(target=_build_cluster, args=(ocm_cmnd, rosa_cmnd, cluster_name_seed, args.must_gather_all, args.mgmt_cluster, mgmt_metadata['provision_shard'], args.create_vpc, vpc_info, args.workers_wait_time, args.add_cluster_load, args.cluster_load_duration, jobs, workers, my_path, my_uuid, loop_counter, es, args.es_url, args.es_index, args.es_index_retry, mgmt_kubeconfig_path, sc_kubeconfig_path, all_clusters_installed, args.service_cluster, oidc_config_id, args.workload_type))
                 except Exception as err:
                     logging.error(err)
                 cluster_thread_list.append(thread)
