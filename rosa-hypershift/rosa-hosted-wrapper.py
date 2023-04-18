@@ -742,8 +742,8 @@ def _cluster_load(kubeconfig, my_path, hosted_cluster_name, mgmt_cluster_name, s
     load_env = os.environ.copy()
     load_env["KUBECONFIG"] = kubeconfig
     load_env["MC_KUBECONFIG"] = mgmt_kubeconfig
-    logging.info('Cloning e2e-benchmarking repo https://github.com/krishvoor/e2e-benchmarking.git')
-    Repo.clone_from("https://github.com/krishvoor/e2e-benchmarking.git", my_path + '/e2e-benchmarking', branch="hypershift-multi-endpoint")
+    logging.info('Cloning e2e-benchmarking repo https://github.com/cloud-bulldozer/e2e-benchmarking.git')
+    Repo.clone_from("https://github.com/cloud-bulldozer/e2e-benchmarking.git", my_path + '/e2e-benchmarking', branch="master")
     url = 'https://github.com/cloud-bulldozer/kube-burner/releases/download/v1.5/kube-burner-1.5-Linux-x86_64.tar.gz'
     dest = my_path + "/kube-burner-1.5-Linux-x86_64.tar.gz"
     response = requests.get(url, stream=True)
@@ -1138,7 +1138,7 @@ def main():
         '--workload-type',
         type=str,
         help="Pass a workload type",
-        default="cluster-density"
+        default="cluster-density-ms"
     )
 # Delete following parameter and code when default security group wont be used
     parser.add_argument(
