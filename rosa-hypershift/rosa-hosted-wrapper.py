@@ -665,7 +665,7 @@ def _build_cluster(ocm_cmnd, rosa_cmnd, cluster_name_seed, must_gather_all, mgmt
             logging.info('Waiting for all clusters to be installed to start e2e-benchmarking execution on %s' % cluster_name)
             all_clusters_installed.wait()
         logging.info('Executing e2e-benchmarking to add load on the cluster %s with %s nodes during %s with %d iterations' % (cluster_name, str(worker_nodes), load_duration, job_iterations))
-        _cluster_load(kubeconfig, cluster_path, cluster_name, mgmt_cluster_name, svc_cluster_name, load_duration, job_iterations, es_url)
+        _cluster_load(kubeconfig, cluster_path, cluster_name, mgmt_cluster_name, svc_cluster_name, load_duration, job_iterations, es_url, mgmt_kubeconfig)
         logging.info('Finished execution of e2e-benchmarking workload on %s' % cluster_name)
     if must_gather_all or process.returncode != 0:
         random_sleep = random.randint(60, 300)
@@ -741,9 +741,10 @@ def _wait_for_workers(kubeconfig, worker_nodes, wait_time, cluster_name):
     return ready_nodes
 
 
-def _cluster_load(kubeconfig, my_path, hosted_cluster_name, mgmt_cluster_name, svc_cluster_name, load_duration, jobs, es_url):
+def _cluster_load(kubeconfig, my_path, hosted_cluster_name, mgmt_cluster_name, svc_cluster_name, load_duration, jobs, es_url, mgmt_kubeconfig):
     load_env = os.environ.copy()
     load_env["KUBECONFIG"] = kubeconfig
+    load_env["MC_KUBECONFIG"] = mgmt_kubeconfig
     logging.info('Cloning e2e-benchmarking repo https://github.com/krishvoor/e2e-benchmarking.git')
     Repo.clone_from("https://github.com/krishvoor/e2e-benchmarking.git", my_path + '/e2e-benchmarking', branch="hypershift-multi-endpoint")
     url = 'https://github.com/cloud-bulldozer/kube-burner/releases/download/v1.5/kube-burner-1.5-Linux-x86_64.tar.gz'
@@ -761,8 +762,8 @@ def _cluster_load(kubeconfig, my_path, hosted_cluster_name, mgmt_cluster_name, s
     os.chmod(my_path + '/kube-burner', 0o777)
 
     os.chdir(my_path + '/e2e-benchmarking/workloads/kube-burner-ocp-wrapper')
-    load_env["JOB_ITERATIONS"] = "500"
-    load_env ["ITERATIONS"] = "500"
+    load_env["JOB_ITERATIONS"] = "27"
+    load_env ["ITERATIONS"] = "27"
     load_env["CHURN"] = "true"
     load_env["CHURN_DURATION"] = load_duration
     load_env["CHURN_PERCENT"] = "10"
@@ -1084,6 +1085,12 @@ def _destroy_aws_iam_roles(cluster_name):
         return 1
 
 
+def _curl_api_results(cluster_name, service_name, ):
+    logging.info("Capture Memory & CPU requests for %s Hosted Cluster", cluster_name)
+    #Placeholder for writing curl commands into CSV file 
+    ## Syntax
+    # curl -H "Authorization: Bearer <TOKEN_INFORMATION>" -k --silent --globoff  https://prometheus-k8s-openshift-monitoring.apps.<CLUSTER_DOMAIN>/api/v1/query?query='sum(kube_node_role{role=~"master|infra|workload|obo"})by(node)&time='<UPDATE_ME>''
+
 def main():
     parser = argparse.ArgumentParser(description="hypershift wrapper script",
                                      parents=[parentParsers.esParser,
@@ -1209,6 +1216,18 @@ def main():
         '--oidc-config-id',
         type=str,
         help='Pass a custom oidc config id to use for the oidc provider. NOTE: this is not deleted on cleanup')
+    parser.add_argument(
+        '--kube-burner-iterations',
+        type=str,
+        help='Pass a value 300, 800, 1500',
+        default= '300'
+    )
+    parser.add_argument(
+        '--workload-type',
+        type=str,
+        help="Pass a workload type",
+        default="cluster-density"
+    )
 # Delete following parameter and code when default security group wont be used
     parser.add_argument(
         '--manually-cleanup-secgroups',
@@ -1376,6 +1395,10 @@ def main():
     else:
         oidc_config_id = _gen_oidc_config_id(rosa_cmnd, cluster_name_seed, my_path)
         oidc_cleanup = True
+
+    if args.kube_burner_iterations:
+       kube_burner_iterations = args.kube_burner_iterations
+       logging.info('kube-burner v1.5 iterations is now %s' % kube_burner_iterations)
     
     # Get connected to management cluster
     logging.info("Getting information of %s management cluster on %s organization" % (args.mgmt_cluster, args.mgmt_org_id))
