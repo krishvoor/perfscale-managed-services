@@ -774,7 +774,7 @@ def get_metadata(cluster_name, rosa_cmnd):
     return metadata
 
 
-def _watcher(rosa_cmnd, my_path, cluster_name_seed, cluster_count, delay, my_uuid, all_clusters_installed, cluster_load):
+def _watcher(rosa_cmnd, my_path, cluster_name_seed, cluster_count, delay, my_uuid, all_clusters_installed):
     time.sleep(60)
     logging.info('Watcher thread started')
     logging.info('Getting status every %d seconds' % int(delay))
