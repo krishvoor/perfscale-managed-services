@@ -587,7 +587,6 @@ def _build_cluster(ocm_cmnd, rosa_cmnd, cluster_name_seed, must_gather_all, crea
                 logging.info("Cluster %s ready. Not waiting for workers to be ready. Setting workers_ready to 0 on ES Document" % cluster_name)
                 metadata['workers_ready'] = 0
             break
-    metadata['mgmt_cluster_name'] = mgmt_cluster_name
     metadata['duration'] = cluster_end_time - cluster_start_time
     metadata['workers'] = str(worker_nodes)
     metadata['uuid'] = my_uuid
