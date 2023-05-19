@@ -554,7 +554,7 @@ def _namespace_wait(kubeconfig, cluster_id, cluster_name, type):
     return 0
 '''
 
-def _build_cluster(ocm_cmnd, rosa_cmnd, cluster_name_seed, must_gather_all, create_vpc, vpc_info, wait_time, job_iterations, worker_nodes, my_path, my_uuid, my_inc, es, es_url, index, index_retry, all_clusters_installed, oidc_config_id, workload_type, operator_roles_prefix):
+def _build_cluster(ocm_cmnd, rosa_cmnd, cluster_name_seed, must_gather_all, create_vpc, vpc_info, wait_time, worker_nodes, my_path, my_uuid, my_inc, es, es_url, index, index_retry, all_clusters_installed, oidc_config_id, workload_type, operator_roles_prefix):
     # pass that dir as the cwd to subproccess
     cluster_path = my_path + "/" + cluster_name_seed + "-" + str(my_inc).zfill(4)
     os.mkdir(cluster_path)
@@ -1270,7 +1270,7 @@ def main():
                         vpc_info = vpcs[(loop_counter - 1) % len(vpcs)]
                         logging.debug("Creating cluster on VPC %s, with subnets: %s" % (vpc_info[0], vpc_info[1]))
                     try:
-                        thread = threading.Thread(target=_build_cluster, args=(ocm_cmnd, rosa_cmnd, cluster_name_seed, args.must_gather_all, args.create_vpc, vpc_info, args.workers_wait_time, jobs, workers, my_path, my_uuid, loop_counter, es, args.es_url, args.es_index, args.es_index_retry, all_clusters_installed, oidc_config_id, operator_roles_prefix))
+                        thread = threading.Thread(target=_build_cluster, args=(ocm_cmnd, rosa_cmnd, cluster_name_seed, args.must_gather_all, args.create_vpc, vpc_info, args.workers_wait_time, workers, my_path, my_uuid, loop_counter, es, args.es_url, args.es_index, args.es_index_retry, all_clusters_installed, oidc_config_id, operator_roles_prefix))
                     except Exception as err:
                         logging.error(err)
                     cluster_thread_list.append(thread)
