@@ -183,65 +183,6 @@ def _verify_oidc_config_id(oidc_config_id, rosa_cmnd, my_path):
     return False
 
 
-def _verify_provision_shard(ocm_cmnd, shard_id):
-    logging.info('Verifing Shard ID: %s' % shard_id)
-    ocm_command = [ocm_cmnd, "get", "/api/clusters_mgmt/v1/provision_shards/" + shard_id]
-    logging.debug(ocm_command)
-    ocm_process = subprocess.Popen(ocm_command, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-    ocm_stdout, ocm_stderr = ocm_process.communicate()
-    if ocm_process.returncode != 0:
-        logging.error(ocm_stdout.strip().decode("utf-8"))
-        logging.error(ocm_stderr.strip().decode("utf-8"))
-        logging.error('%s unable to execute. Exiting...' % ocm_command)
-        exit(1)
-    else:
-        if json.loads(ocm_stdout.decode("utf-8")).get('hypershift_config', {}).get('server', {}) and json.loads(ocm_stdout.decode("utf-8")).get('status', {}) in ('ready', 'maintenance'):
-            # hypershift_config.server is the service cluster, like https: // api.hs-sc-0vfs0cl5g.wqrn.s1.devshift.org: 6443. split('.')[1] will return hs-sc-0vfs0cl5g
-            logging.info("Identified Service Cluster %s for Shard ID %s" % (json.loads(ocm_stdout.decode("utf-8"))['hypershift_config']['server'].split('.')[1], shard_id))
-            return json.loads(ocm_stdout.decode("utf-8"))['hypershift_config']['server'].split('.')[1]
-        else:
-            logging.error(ocm_stdout.strip().decode("utf-8"))
-            logging.error(ocm_stderr.strip().decode("utf-8"))
-            logging.error('Invalid Provision Shard %s. Exiting...' % shard_id)
-            exit(1)
-
-
-def _get_mgmt_cluster(sc_kubeconfig, cluster_id, cluster_name):
-    starting_time = datetime.datetime.utcnow().timestamp()
-    logging.info('Getting Management Cluster assigned for %s' % cluster_name)
-    myenv = os.environ.copy()
-    myenv["KUBECONFIG"] = sc_kubeconfig
-    oc_cmnd = ["oc", "get", "managedclusters", cluster_id, "-o", "json"]
-    logging.debug(oc_cmnd)
-    logging.info("Waiting 15 minutes until %s for Management Cluster to be assigned to Hosted Cluster %s" % (cluster_name, datetime.datetime.fromtimestamp(starting_time + 15 * 60)))
-    while datetime.datetime.utcnow().timestamp() < starting_time + 15 * 60:
-        oc_process = subprocess.Popen(oc_cmnd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=myenv)
-        oc_stdout, oc_stderr = oc_process.communicate()
-        if oc_process.returncode != 0:
-            logging.error(oc_stdout.strip().decode("utf-8"))
-            logging.error(oc_stderr.strip().decode("utf-8"))
-            logging.error('%s unable to execute. Retrying in 5 seconds until %s' % (oc_cmnd, datetime.datetime.fromtimestamp(starting_time + 15 * 60)))
-            time.sleep(5)
-        else:
-            try:
-                hostedcluster_json = json.loads(oc_stdout)
-            except Exception as err:
-                logging.warning(oc_stdout)
-                logging.warning(oc_stderr)
-                logging.warning(err)
-                logging.warning("Failed to get the hosted cluster output for %s Cluster. Retrying in 5 seconds until %s" % (cluster_name, datetime.datetime.fromtimestamp(starting_time + 15 * 60)))
-                time.sleep(5)
-                continue
-            if hostedcluster_json.get('metadata', {}).get('labels', {}).get('api.openshift.com/management-cluster'):
-
-                return hostedcluster_json['metadata']['labels']['api.openshift.com/management-cluster']
-            else:
-                logging.warning("Failed to get the Management Cluster assigned for Hosted Cluster %s. Retrying in 5 seconds until %s" % (cluster_name, datetime.datetime.fromtimestamp(starting_time + 15 * 60)))
-                time.sleep(5)
-    logging.error('No Management Cluster assigned to %s after 15 minutes' % cluster_name)
-    return 1
-
-
 def _gen_operator_roles(rosa_cmnd, cluster_name_seed, my_path, oidc_id, installer_role_arn):
     logging.info("Creating Operator Roles")
     roles_cmd = [rosa_cmnd, 'create', 'operator-roles', '--prefix', cluster_name_seed, '-m', 'auto', '-y', '--hosted-cp', '--oidc-config-id', oidc_id, '--installer-role-arn', installer_role_arn]
@@ -438,45 +379,6 @@ def _delete_security_groups(aws_region, my_path, vpc_id):
         return 1
 
 
-def _get_mgmt_cluster_info(ocm_cmnd, mgmt_cluster, es, index, index_retry, uuid):
-    logging.info('Searching for Management/Service Clusters with name %s' % mgmt_cluster)
-    ocm_command = [ocm_cmnd, "get", "/api/clusters_mgmt/v1/clusters?search=name+is+%27" + mgmt_cluster + "%27"]
-    logging.debug(ocm_command)
-    ocm_process = subprocess.Popen(ocm_command, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-    ocm_stdout, ocm_stderr = ocm_process.communicate()
-    metadata = {}
-    if ocm_process.returncode != 0:
-        logging.error('%s unable to execute ' % ocm_command)
-        logging.error(ocm_stderr.strip().decode("utf-8"))
-    else:
-        for cluster in json.loads(ocm_stdout.decode("utf-8"))['items']:
-            if cluster['id'] == mgmt_cluster or cluster['name'] == mgmt_cluster:
-                metadata['uuid'] = uuid
-                metadata['cluster_name'] = cluster['name']
-                metadata['infra_id'] = cluster['infra_id']
-                metadata['cluster_id'] = cluster['id']
-                metadata['version'] = cluster['openshift_version']
-                metadata['base_domain'] = cluster['dns']['base_domain']
-                metadata['aws_region'] = cluster['region']['id']
-                if 'compute' in cluster['nodes']:
-                    metadata['workers'] = cluster['nodes']['compute']
-                else:  # when autoscaling enabled
-                    metadata['workers'] = cluster['nodes']['autoscale_compute']['min_replicas']
-                    metadata['workers_min'] = cluster['nodes']['autoscale_compute']['min_replicas']
-                    metadata['workers_max'] = cluster['nodes']['autoscale_compute']['max_replicas']
-                metadata['workers_type'] = cluster['nodes']['compute_machine_type']['id']
-                metadata['network_type'] = cluster['network']['type']
-                metadata["timestamp"] = datetime.datetime.utcnow().isoformat()
-                metadata['install_method'] = "rosa"
-                es_ignored_metadata = ""
-                if es is not None:
-                    common._index_result(es, index, metadata, es_ignored_metadata, index_retry)
-        if metadata == {}:
-            logging.error("Management/Service Cluster %s not found" % mgmt_cluster)
-            exit(1)
-    return metadata
-
-
 def _download_kubeconfig(ocm_cmnd, cluster_id, my_path, type):
     logging.debug('Downloading kubeconfig file for Cluster %s on %s' % (cluster_id, my_path))
     kubeconfig_cmd = [ocm_cmnd, "get", "/api/clusters_mgmt/v1/clusters/" + cluster_id + "/credentials"]
@@ -606,7 +508,7 @@ def _preflight_wait(rosa_cmnd, cluster_id, cluster_name):
     logging.error("Cluster %s on %s status (not installing) after 60 minutes. Exiting preflight waiting..." % (cluster_name, current_status))
     return return_data
 
-
+'''
 def _namespace_wait(kubeconfig, cluster_id, cluster_name, type):
     start_time = int(time.time())
     logging.info('Capturing namespace creation time on %s Cluster for %s. Waiting 30 minutes until %s' % (type, cluster_name, datetime.datetime.fromtimestamp(start_time + 30 * 60)))
@@ -650,9 +552,9 @@ def _namespace_wait(kubeconfig, cluster_id, cluster_name, type):
                 time.sleep(5)
     logging.error("Failed to get namespace for %s on the %s cluster after 15 minutes" % (cluster_name, type))
     return 0
+'''
 
-
-def _build_cluster(ocm_cmnd, rosa_cmnd, cluster_name_seed, must_gather_all, provision_shard, create_vpc, vpc_info, wait_time, cluster_load, load_duration, job_iterations, worker_nodes, my_path, my_uuid, my_inc, es, es_url, index, index_retry, service_cluster_name, sc_kubeconfig, all_clusters_installed, oidc_config_id, workload_type, kube_burner_version, e2e_git_details, git_branch, operator_roles_prefix):
+def _build_cluster(ocm_cmnd, rosa_cmnd, cluster_name_seed, must_gather_all, create_vpc, vpc_info, wait_time, job_iterations, worker_nodes, my_path, my_uuid, my_inc, es, es_url, index, index_retry, all_clusters_installed, oidc_config_id, workload_type, operator_roles_prefix):
     # pass that dir as the cwd to subproccess
     cluster_path = my_path + "/" + cluster_name_seed + "-" + str(my_inc).zfill(4)
     os.mkdir(cluster_path)
@@ -663,9 +565,6 @@ def _build_cluster(ocm_cmnd, rosa_cmnd, cluster_name_seed, must_gather_all, prov
     if create_vpc:
         cluster_cmd.append("--subnet-ids")
         cluster_cmd.append(vpc_info[1])
-    if provision_shard:
-        cluster_cmd.append("--properties")
-        cluster_cmd.append("provision_shard_id:" + provision_shard)
     if args.wildcard_options:
         for param in args.wildcard_options.split():
             cluster_cmd.append(param)
@@ -695,7 +594,6 @@ def _build_cluster(ocm_cmnd, rosa_cmnd, cluster_name_seed, must_gather_all, prov
             else:
                 cluster_end_time = int(time.time())
                 metadata['status'] = "Not Installed"
-                cluster_load = False
                 logging.error("%s Cluster installation failed after 5 retries" % cluster_name)
                 logging.debug(stdout)
         else:
@@ -704,13 +602,7 @@ def _build_cluster(ocm_cmnd, rosa_cmnd, cluster_name_seed, must_gather_all, prov
             metadata['install_try'] = trying
             with concurrent.futures.ThreadPoolExecutor() as executor:
                 preflight_ch = executor.submit(_preflight_wait, rosa_cmnd, metadata['cluster_id'], cluster_name)
-                sc_namespace = executor.submit(_namespace_wait, sc_kubeconfig, metadata['cluster_id'], cluster_name, "Service") if sc_kubeconfig != "" else 0
                 preflight_checks = preflight_ch.result()
-                sc_namespace_timing = sc_namespace.result()
-            mgmt_cluster_name = _get_mgmt_cluster(sc_kubeconfig, metadata['cluster_id'], cluster_name)
-            mgmt_metadata = _get_mgmt_cluster_info(ocm_cmnd, mgmt_cluster_name, es, index, index_retry, uuid)
-            mgmt_kubeconfig_path = _download_kubeconfig(ocm_cmnd, mgmt_metadata['cluster_id'], cluster_path, "mgmt") if mgmt_cluster_name else None
-            mc_namespace_timing = _namespace_wait(mgmt_kubeconfig_path, metadata['cluster_id'], cluster_name, "Management") if mgmt_kubeconfig_path != "" else 0
             watch_cmd = [rosa_cmnd, "logs", "install", "-c", cluster_name, "--watch"]
             logging.debug(watch_cmd)
             watch_process = subprocess.Popen(watch_cmd, stdout=installation_log, stderr=installation_log, preexec_fn=disable_signals)
@@ -722,33 +614,26 @@ def _build_cluster(ocm_cmnd, rosa_cmnd, cluster_name_seed, must_gather_all, prov
             metadata['cluster-admin-create'] = return_data['cluster-admin-create'] if 'cluster-admin-create' in return_data else 0
             metadata['cluster-admin-login'] = return_data['cluster-admin-login'] if 'cluster-admin-login' in return_data else 0
             metadata['cluster-oc-adm'] = return_data['cluster-oc-adm'] if 'cluster-oc-adm' in return_data else 0
-            metadata['mgmt_namespace'] = mc_namespace_timing
-            metadata['sc_namespace'] = sc_namespace_timing
             metadata['preflight_checks'] = preflight_checks
             if kubeconfig == "":
-                logging.error("Failed to download kubeconfig file. Disabling wait for workers and e2e-benchmarking execution on %s" % cluster_name)
+                logging.error("Failed to download kubeconfig file. Disabling wait for workers on %s" % cluster_name)
                 wait_time = 0
-                cluster_load = False
                 metadata['status'] = "Ready. Not Access"
             if wait_time != 0:
                 logging.info("Waiting %d minutes for %d workers to be ready on %s" % (wait_time, worker_nodes, cluster_name))
                 workers_ready = _wait_for_workers(kubeconfig, worker_nodes, wait_time, cluster_name)
                 cluster_workers_ready = int(time.time())
                 logging.info("%d workers ready after %d seconds on %s" % (workers_ready, cluster_workers_ready - cluster_start_time, cluster_name))
-                if cluster_load and workers_ready != worker_nodes:
+                if workers_ready != worker_nodes:
                     logging.error("Insufficient number of workers (%d). Expected: %d. Disabling e2e-benchmarking execution on %s" % (workers_ready, worker_nodes, cluster_name))
-                    cluster_load = False
                     metadata['status'] = "Ready. No Workers"
                 metadata['workers_ready'] = cluster_workers_ready - cluster_start_time if workers_ready == worker_nodes else ""
             else:
                 logging.info("Cluster %s ready. Not waiting for workers to be ready. Setting workers_ready to 0 on ES Document" % cluster_name)
                 metadata['workers_ready'] = 0
-                cluster_load = False
             break
     metadata['mgmt_cluster_name'] = mgmt_cluster_name
     metadata['duration'] = cluster_end_time - cluster_start_time
-    metadata['job_iterations'] = str(job_iterations) if cluster_load else 0
-    metadata['load_duration'] = load_duration if cluster_load else ""
     metadata['workers'] = str(worker_nodes)
     metadata['uuid'] = my_uuid
     metadata['operation'] = "install"
@@ -764,20 +649,12 @@ def _build_cluster(ocm_cmnd, rosa_cmnd, cluster_name_seed, must_gather_all, prov
         metadata["timestamp"] = datetime.datetime.utcnow().isoformat()
         es_ignored_metadata = ""
         common._index_result(es, index, metadata, es_ignored_metadata, index_retry)
-    if cluster_load:
-        with all_clusters_installed:
-            logging.info('Waiting for all clusters to be installed to start e2e-benchmarking execution on %s' % cluster_name)
-            all_clusters_installed.wait()
-        logging.info('Executing e2e-benchmarking to add load on the cluster %s with %s nodes during %s with %d iterations' % (cluster_name, str(worker_nodes), load_duration, job_iterations))
-        _cluster_load(kubeconfig, cluster_path, cluster_name, mgmt_cluster_name, service_cluster_name, load_duration, job_iterations, es_url, mgmt_kubeconfig_path, workload_type, kube_burner_version, e2e_git_details, git_branch)
-        logging.info('Finished execution of e2e-benchmarking workload on %s' % cluster_name)
     if must_gather_all or process.returncode != 0:
         random_sleep = random.randint(60, 300)
         logging.info("Waiting %d seconds before dumping hosted cluster must-gather" % random_sleep)
         time.sleep(random_sleep)
         logging.info("Saving must-gather file of hosted cluster %s" % cluster_name)
         _get_must_gather(cluster_path, cluster_name)
-        _get_mgmt_cluster_must_gather(mgmt_kubeconfig_path, my_path)
 
 
 def _get_workers_ready(kubeconfig, cluster_name):
@@ -846,43 +723,6 @@ def _wait_for_workers(kubeconfig, worker_nodes, wait_time, cluster_name):
     return ready_nodes
 
 
-def _cluster_load(kubeconfig, my_path, hosted_cluster_name, mgmt_cluster_name, svc_cluster_name, load_duration, jobs, es_url, mgmt_kubeconfig, workload_type, kube_burner_version, e2e_git_details, git_branch):
-    load_env = os.environ.copy()
-    load_env["KUBECONFIG"] = kubeconfig
-    load_env["MC_KUBECONFIG"] = mgmt_kubeconfig
-    logging.info('Cloning e2e-benchmarking repo %s', )
-    Repo.clone_from(e2e_git_details, my_path + '/e2e-benchmarking', branch=git_branch)
-    url = "https://github.com/cloud-bulldozer/kube-burner/releases/download/v" + kube_burner_version + "/kube-burner-" + kube_burner_version + "-Linux-x86_64.tar.gz"
-    dest = my_path + "/kube-burner-" + kube_burner_version + "-Linux-x86_64.tar.gz"
-    response = requests.get(url, stream=True)
-    with open(dest, 'wb') as f:
-        f.write(response.raw.read())
-    untar_kb = ["tar", "xzf", my_path + "/kube-burner-" + kube_burner_version + "-Linux-x86_64.tar.gz", "-C", my_path + "/"]
-    logging.debug(untar_kb)
-    untar_kb_process = subprocess.Popen(untar_kb, stdout=subprocess.PIPE, stderr=subprocess.PIPE, universal_newlines=True, env=load_env)
-    stdout, stderr = untar_kb_process.communicate()
-    if untar_kb_process.returncode != 0:
-        logging.error("Failed to untar Kube-burner from %s to %s" % (my_path + "/kube-burner-" + kube_burner_version + "-Linux-x86_64.tar.gz", my_path + "/kube-burner"))
-        return 1
-    os.chmod(my_path + '/kube-burner', 0o777)
-    os.chdir(my_path + '/e2e-benchmarking/workloads/kube-burner-ocp-wrapper')
-    load_env["ITERATIONS"] = str(jobs)
-    load_env["EXTRA_FLAGS"] = "--churn-duration=" + load_duration + " --churn-percent=10 --churn-delay=30s --timeout=24h"
-    if es_url is not None:
-        load_env["ES_SERVER"] = es_url
-    load_env["LOG_LEVEL"] = "debug"
-    load_env["WORKLOAD"] = str(workload_type)
-    load_env["KUBE_DIR"] = my_path
-    load_command = ["./run.sh"]
-    logging.debug(load_command)
-    load_log = open(my_path + '/cluster_load.log', 'w')
-    if not force_terminate:
-        load_process = subprocess.Popen(load_command, stdout=load_log, stderr=load_log, env=load_env)
-        load_process_stdout, load_process_stderr = load_process.communicate()
-    else:
-        logging.warning("Not starting e2e on cluster %s after capturing Ctrl-C" % hosted_cluster_name)
-
-
 def _get_must_gather(cluster_path, cluster_name):
     myenv = os.environ.copy()
     myenv["KUBECONFIG"] = cluster_path + "/kubeconfig"
@@ -910,36 +750,6 @@ def _get_must_gather(cluster_path, cluster_name):
     must_gather_delete_stdout, must_gather_delete_stderr = must_gather_delete_process.communicate()
     if must_gather_delete_process.returncode != 0:
         logging.error("Failed to delete non-compressed must-gather files of hosted cluster %s" % cluster_name)
-        return 1
-
-
-def _get_mgmt_cluster_must_gather(kubeconfig, my_path):
-    myenv = os.environ.copy()
-    myenv["KUBECONFIG"] = kubeconfig
-    logging.info('Gathering facts of management cluster')
-    must_gather_command = ["oc", "adm", "must-gather", "--dest-dir", my_path + "/must_gather"]
-    logging.debug(must_gather_command)
-    must_gather_log = open(my_path + '/management_cluster_must_gather.log', 'w')
-    must_gather_process = subprocess.Popen(must_gather_command, stdout=must_gather_log, stderr=must_gather_log, env=myenv)
-    must_gather_stdout, must_gather_stderr = must_gather_process.communicate()
-    if must_gather_process.returncode != 0:
-        logging.error("Failed to obtain must-gather from Management Cluster")
-        return 1
-    logging.info('Compressing must gather artifacts on %s file' % (my_path + "/management_cluster_must_gather.tar.gz"))
-    must_gather_compress_command = ["tar", "czvf", my_path + "/management_cluster_must_gather.tar.gz", my_path + "/must_gather"]
-    logging.debug(must_gather_compress_command)
-    must_gather_compress_process = subprocess.Popen(must_gather_compress_command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, universal_newlines=True, env=myenv)
-    must_gather_compress_stdout, must_gather_compress_stderr = must_gather_compress_process.communicate()
-    if must_gather_compress_process.returncode != 0:
-        logging.error("Failed to compress must-gather of Management Cluster from %s to %s" % (my_path + "/must_gather", my_path + "must_gather.tar.gz"))
-        return 1
-    logging.info('Deleting non-compressed must-gather files of Management Cluster')
-    must_gather_delete_command = ["rm", "-rf", my_path + "/must_gather"]
-    logging.debug(must_gather_delete_command)
-    must_gather_delete_process = subprocess.Popen(must_gather_delete_command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, universal_newlines=True, env=myenv)
-    must_gather_delete_stdout, must_gather_delete_stderr = must_gather_delete_process.communicate()
-    if must_gather_delete_process.returncode != 0:
-        logging.error("Failed to delete non-compressed must-gather files of Management Cluster")
         return 1
 
 
@@ -1021,17 +831,13 @@ def _watcher(rosa_cmnd, my_path, cluster_name_seed, cluster_count, delay, my_uui
                 all_clusters_installed.notify_all()
             break
         elif installed_clusters == cluster_count:
-            if cluster_load and clusters_with_all_workers == cluster_count:
+            if clusters_with_all_workers == cluster_count:
                 logging.info('All clusters on ready status and all clusters with all workers ready. Waiting 5 extra minutes to allow all cluster installations to arrive notify status')
                 time.sleep(300)
                 with all_clusters_installed:
                     logging.info('All requested clusters on ready status, notifying threads to start e2e-benchmarking processes')
                     all_clusters_installed.notify_all()
                     break
-            elif not cluster_load:
-                logging.info('All clusters on ready status and no loading process required. Waiting 5 extra minutes to allow all cluster installations to finish.')
-                time.sleep(300)
-                break
             else:
                 logging.info("Waiting %d seconds for next watcher run" % delay)
                 time.sleep(delay)
@@ -1167,15 +973,6 @@ def main():
         action='store_true',
         help='Execute `rosa init` command to configure AWS account')
     parser.add_argument(
-        '--add-cluster-load',
-        action='store_true',
-        help='Execute e2e script after hosted cluster is installed to load it')
-    parser.add_argument(
-        '--cluster-load-duration',
-        type=str,
-        default='4h',
-        help='CHURN_DURATION parameter used on the e2e script')
-    parser.add_argument(
         '--cluster-load-jobs-per-worker',
         type=int,
         default=10,
@@ -1273,8 +1070,6 @@ def main():
     else:
         logging.info('Logging to console')
 
-    if args.add_cluster_load and args.workers_wait_time == 0:
-        parser.error("Workers wait time > 0 expected when --add-cluster-load is used")
 
     # global uuid to assign for the group of clusters created. each cluster will have its own cluster-id
     my_uuid = args.uuid
@@ -1401,9 +1196,6 @@ def main():
             logging.info('`rosa init` execution OK')
             logging.debug(rosa_init_stdout.strip().decode("utf-8"))
 
-    if args.provision_shard:
-        service_cluster = _verify_provision_shard(ocm_cmnd, args.provision_shard)
-
     if args.oidc_config_id:
         oidc_config_id = args.oidc_config_id
         oidc_cleanup = False
@@ -1422,9 +1214,6 @@ def main():
 
     # Get connected to the Service Cluster
     logging.info("Getting information of %s Service Cluster" % service_cluster)
-    sc_metadata = _get_mgmt_cluster_info(ocm_cmnd, service_cluster, es, args.es_index, args.es_index_retry, my_uuid)
-    sc_kubeconfig_path = _download_kubeconfig(ocm_cmnd, sc_metadata['cluster_id'], my_path, "service") if 'cluster_id' in sc_metadata else ""
-    access_to_service_cluster = True if sc_kubeconfig_path != "" else False
 
     if args.create_vpc:
         logging.info("Clusters Requested: %d. Clusters Per VPC: %d. VPCs to create: %d" % (args.cluster_count, args.clusters_per_vpc, math.ceil(args.cluster_count / args.clusters_per_vpc)))
@@ -1439,7 +1228,7 @@ def main():
     global force_terminate
     force_terminate = False
     all_clusters_installed = threading.Condition()
-    watcher = threading.Thread(target=_watcher, args=(rosa_cmnd, my_path, cluster_name_seed, args.cluster_count, args.watcher_delay, my_uuid, all_clusters_installed, args.add_cluster_load))
+    watcher = threading.Thread(target=_watcher, args=(rosa_cmnd, my_path, cluster_name_seed, args.cluster_count, args.watcher_delay, my_uuid, all_clusters_installed))
     signal.signal(signal.SIGINT, set_force_terminate)
     watcher.daemon = True
     watcher.start()
@@ -1478,19 +1267,12 @@ def main():
                         workers = int(args.workers)
                     else:
                         workers = int(args.workers.split(",")[(loop_counter - 1) % len(args.workers.split(","))])
-                    if args.add_cluster_load:
-                        low_jobs = max(0, int((args.cluster_load_jobs_per_worker * workers) - (float(args.cluster_load_job_variation) * float(args.cluster_load_jobs_per_worker * workers) / 100)))
-                        high_jobs = int((args.cluster_load_jobs_per_worker * workers) + (float(args.cluster_load_job_variation) * float(args.cluster_load_jobs_per_worker * workers) / 100))
-                        jobs = random.randint(low_jobs, high_jobs)
-                        logging.debug("Selected jobs: %d" % jobs)
-                    else:
-                        jobs = 0
                     vpc_info = ""
                     if args.create_vpc:
                         vpc_info = vpcs[(loop_counter - 1) % len(vpcs)]
                         logging.debug("Creating cluster on VPC %s, with subnets: %s" % (vpc_info[0], vpc_info[1]))
                     try:
-                        thread = threading.Thread(target=_build_cluster, args=(ocm_cmnd, rosa_cmnd, cluster_name_seed, args.must_gather_all, args.provision_shard, args.create_vpc, vpc_info, args.workers_wait_time, args.add_cluster_load, args.cluster_load_duration, jobs, workers, my_path, my_uuid, loop_counter, es, args.es_url, args.es_index, args.es_index_retry, service_cluster, sc_kubeconfig_path, all_clusters_installed, oidc_config_id, args.workload_type, args.kube_burner_version, args.e2e_git_details, args.git_branch, operator_roles_prefix))
+                        thread = threading.Thread(target=_build_cluster, args=(ocm_cmnd, rosa_cmnd, cluster_name_seed, args.must_gather_all, args.create_vpc, vpc_info, args.workers_wait_time, jobs, workers, my_path, my_uuid, loop_counter, es, args.es_url, args.es_index, args.es_index_retry, all_clusters_installed, oidc_config_id, operator_roles_prefix))
                     except Exception as err:
                         logging.error(err)
                     cluster_thread_list.append(thread)
@@ -1515,10 +1297,6 @@ def main():
                 continue
             else:
                 raise
-
-    if access_to_service_cluster:
-        logging.info('Collect must-gather from Service Cluster %s' % sc_metadata['cluster_name'])
-        _get_mgmt_cluster_must_gather(sc_kubeconfig_path, my_path)
 
     if args.cleanup_clusters:
         logging.info("Waiting %d minutes before starting the deleting process" % args.wait_before_cleanup)
