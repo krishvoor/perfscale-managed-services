@@ -877,7 +877,7 @@ def main():
         '--aws-region',
         type=str,
         help='AWS region to be used',
-        default="us-east-2")
+        default="us-west-2")
     parser.add_argument(
         '--ocm-token',
         type=str,
