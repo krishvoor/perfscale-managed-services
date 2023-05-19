@@ -508,53 +508,8 @@ def _preflight_wait(rosa_cmnd, cluster_id, cluster_name):
     logging.error("Cluster %s on %s status (not installing) after 60 minutes. Exiting preflight waiting..." % (cluster_name, current_status))
     return return_data
 
-'''
-def _namespace_wait(kubeconfig, cluster_id, cluster_name, type):
-    start_time = int(time.time())
-    logging.info('Capturing namespace creation time on %s Cluster for %s. Waiting 30 minutes until %s' % (type, cluster_name, datetime.datetime.fromtimestamp(start_time + 30 * 60)))
-    myenv = os.environ.copy()
-    myenv["KUBECONFIG"] = kubeconfig
-    projects_cmnd = ["oc", "get", "projects", "--output", "json"]
-    # Waiting 30 minutes for preflight checks to end
-    while datetime.datetime.utcnow().timestamp() < start_time + 30 * 60:
-        if force_terminate:
-            logging.error("Exiting namespace creation waiting for %s on the %s cluster after capturing Ctrl-C" % (cluster_name, type))
-            return 0
-        projects_process = subprocess.Popen(projects_cmnd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=myenv)
-        logging.debug(projects_cmnd)
-        projects_process_stdout, projects_process_stderr = projects_process.communicate()
-        if projects_process.returncode != 0:
-            logging.warning(projects_process_stdout)
-            logging.warning(projects_process_stderr)
-            logging.warning("Failed to get the project list on the %s Cluster. Retrying in 5 seconds. Waiting until %s" % (type, datetime.datetime.fromtimestamp(start_time + 30 * 60)))
-            time.sleep(5)
-        else:
-            try:
-                projects_json = json.loads(projects_process_stdout)
-            except Exception as err:
-                logging.warning(projects_process_stdout)
-                logging.warning(projects_process_stderr)
-                logging.warning(err)
-                logging.warning("Failed to get the project list on the %s Cluster. Retrying in 5 seconds until %s" % (type, datetime.datetime.fromtimestamp(start_time + 30 * 60)))
-                time.sleep(5)
-                continue
-            projects = projects_json['items'] if 'items' in projects_json else []
-            namespace_count = 0
-            for project in projects:
-                if 'metadata' in project and 'name' in project['metadata'] and cluster_id in project['metadata']['name']:
-                    namespace_count += 1
-            if (type == "Service" and namespace_count == 2) or (type == "Management" and namespace_count == 3):
-                end_time = int(time.time())
-                logging.info("Namespace for %s created in %s cluster in %d seconds" % (cluster_name, type, (end_time - start_time)))
-                return end_time - start_time
-            else:
-                logging.warning("Namespace for %s not found in %s Cluster. Retrying in 5 seconds until %s" % (cluster_name, type, datetime.datetime.fromtimestamp(start_time + 30 * 60)))
-                time.sleep(5)
-    logging.error("Failed to get namespace for %s on the %s cluster after 15 minutes" % (cluster_name, type))
-    return 0
-'''
 
-def _build_cluster(ocm_cmnd, rosa_cmnd, cluster_name_seed, must_gather_all, create_vpc, vpc_info, wait_time, worker_nodes, my_path, my_uuid, my_inc, es, es_url, index, index_retry, all_clusters_installed, oidc_config_id, workload_type, operator_roles_prefix):
+def _build_cluster(ocm_cmnd, rosa_cmnd, cluster_name_seed, must_gather_all, create_vpc, vpc_info, wait_time, worker_nodes, my_path, my_uuid, my_inc, es, es_url, index, index_retry, all_clusters_installed, oidc_config_id, operator_roles_prefix):
     # pass that dir as the cwd to subproccess
     cluster_path = my_path + "/" + cluster_name_seed + "-" + str(my_inc).zfill(4)
     os.mkdir(cluster_path)
@@ -973,16 +928,6 @@ def main():
         action='store_true',
         help='Execute `rosa init` command to configure AWS account')
     parser.add_argument(
-        '--cluster-load-jobs-per-worker',
-        type=int,
-        default=10,
-        help='Optimus number of job iterations per worker. Workload will scale it to the number of workers')
-    parser.add_argument(
-        '--cluster-load-job-variation',
-        type=int,
-        default=0,
-        help='Percentage of variation of jobs to execute. Job iterations will be a number from jobs_per_worker * workers * (-X%% to +X%%)')
-    parser.add_argument(
         '--workers-wait-time',
         type=int,
         default=60,
@@ -1018,26 +963,6 @@ def main():
         '--common-operator-roles',
         action='store_true',
         help='Create unique operator roles and use them on all the cluster installations')
-    parser.add_argument(
-        '--workload-type',
-        type=str,
-        help="Pass the workload type: cluster-density, cluster-density-v2, cluster-density-ms",
-        default="cluster-density-ms")
-    parser.add_argument(
-        '--kube-burner-version',
-        type=str,
-        help='Kube-burner version, if none provided defaults to 1.5 ',
-        default='1.5')
-    parser.add_argument(
-        '--e2e-git-details',
-        type=str,
-        help='Supply the e2e-benchmarking Git URL',
-        default="https://github.com/cloud-bulldozer/e2e-benchmarking.git")
-    parser.add_argument(
-        '--git-branch',
-        type=str,
-        help='Specify a desired branch of the corresponding git',
-        default='master')
 
 # Delete following parameter and code when default security group wont be used
     parser.add_argument(
