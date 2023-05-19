@@ -930,7 +930,7 @@ def main():
         help='Token to be used by OCM and ROSA commands')
     parser.add_argument(
         '--provision-shard',
-        required=True,
+        required=False,
         type=str,
         help='Provision Shard used to deploy the Hosted Clusters')
     parser.add_argument(
@@ -1212,8 +1212,6 @@ def main():
         roles_created = _gen_operator_roles(rosa_cmnd, cluster_name_seed, my_path, oidc_config_id, installer_role_arn)
         operator_roles_prefix = cluster_name_seed if roles_created else ""
 
-    # Get connected to the Service Cluster
-    logging.info("Getting information of %s Service Cluster" % service_cluster)
 
     if args.create_vpc:
         logging.info("Clusters Requested: %d. Clusters Per VPC: %d. VPCs to create: %d" % (args.cluster_count, args.clusters_per_vpc, math.ceil(args.cluster_count / args.clusters_per_vpc)))
