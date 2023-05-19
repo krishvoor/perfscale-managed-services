@@ -13,7 +13,7 @@ variable "cluster_name_seed" {
 variable "aws_region" {
   type        = string
   description = "The region to create the ROSA cluster in"
-  default     = "us-east-2"
+  default     = "us-west-2"
 }
 
 data "aws_availability_zones" "available" {
